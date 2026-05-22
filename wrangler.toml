@@ -1,0 +1,10 @@
+name            = "rcloot-worker"
+main            = "worker.js"
+compatibility_date = "2024-09-23"
+
+[[r2_buckets]]
+binding     = "LOOT_BUCKET"
+bucket_name = "rcloot-sessions"
+
+# After deploying, set your password with:
+#   npx wrangler secret put GUILD_PASSWORD
