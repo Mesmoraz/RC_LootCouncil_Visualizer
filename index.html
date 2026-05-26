@@ -137,6 +137,26 @@
       font-size: 12px;
     }
     .btn-refresh-sessions:hover { color: #c8960c; border-color: #c8960c; }
+    .btn-rename-session {
+      padding: 6px 10px;
+      background: transparent;
+      border: 1px solid #333;
+      color: #888;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .btn-rename-session:hover { border-color: #c8960c; color: #c8960c; }
+    .btn-delete-session {
+      padding: 6px 10px;
+      background: transparent;
+      border: 1px solid #442222;
+      color: #884444;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .btn-delete-session:hover { background: #2a1515; border-color: #883333; color: #ff6666; }
 
     #paste-zone {
       background: #111;
@@ -378,7 +398,9 @@
     <div class="session-row">
       <select id="session-select"><option value="">No saved sessions found</option></select>
       <button class="btn-refresh-sessions" onclick="fetchSavedSessions()" title="Refresh list">↻</button>
-      <button class="btn-load-session" onclick="loadSavedSession()">Load Selected</button>
+      <button class="btn-load-session" onclick="loadSavedSession()">Load</button>
+      <button class="btn-rename-session" onclick="renameSession()" title="Rename selected session">✏</button>
+      <button class="btn-delete-session" onclick="deleteSession()" title="Delete selected session">🗑</button>
     </div>
   </div>
 
@@ -708,6 +730,83 @@ async function loadSavedSession() {
     showError('Failed to load session: ' + e.message);
   } finally {
     btn.textContent = 'Load Selected';
+    btn.disabled    = false;
+  }
+}
+
+async function deleteSession() {
+  const sel = document.getElementById('session-select');
+  const key = sel.value;
+  if (!key) return;
+  const name = formatSessionName(key);
+  if (!confirm(`Delete "${name}"?\n\nThis cannot be undone.`)) return;
+
+  const btn = document.querySelector('.btn-delete-session');
+  btn.textContent = '…';
+  btn.disabled    = true;
+  try {
+    const cfg = getConfig();
+    const res = await fetch(`${cfg.workerUrl}/sessions/${encodeURIComponent(key)}`, {
+      method: 'DELETE',
+      headers: { 'X-Guild-Password': cfg.password },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await fetchSavedSessions();
+  } catch(e) {
+    showError('Delete failed: ' + e.message);
+  } finally {
+    btn.textContent = '🗑';
+    btn.disabled    = false;
+  }
+}
+
+async function renameSession() {
+  const sel = document.getElementById('session-select');
+  const key = sel.value;
+  if (!key) return;
+
+  const currentLabel = key.replace(/\.json$/, '').split('_').slice(2).join(' ').replace(/-/g, ' ');
+  const newLabel = prompt('New session label:', currentLabel);
+  if (newLabel === null || newLabel.trim() === currentLabel.trim()) return;
+
+  const btn = document.querySelector('.btn-rename-session');
+  btn.textContent = '…';
+  btn.disabled    = true;
+  try {
+    const cfg  = getConfig();
+    // Fetch existing data
+    const res  = await fetch(`${cfg.workerUrl}/sessions/${encodeURIComponent(key)}`, {
+      headers: { 'X-Guild-Password': cfg.password },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    // Build new key preserving original date/time prefix
+    const datePart = key.split('_').slice(0, 2).join('_');
+    const slug     = newLabel.trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
+    const newKey   = `${datePart}${slug ? '_' + slug : ''}.json`;
+
+    // Save under new key
+    const putRes = await fetch(`${cfg.workerUrl}/sessions/${encodeURIComponent(newKey)}`, {
+      method: 'PUT',
+      headers: { 'X-Guild-Password': cfg.password, 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!putRes.ok) throw new Error(`Save failed: HTTP ${putRes.status}`);
+
+    // Delete old key
+    await fetch(`${cfg.workerUrl}/sessions/${encodeURIComponent(key)}`, {
+      method: 'DELETE',
+      headers: { 'X-Guild-Password': cfg.password },
+    });
+
+    await fetchSavedSessions();
+    // Select the renamed entry
+    document.getElementById('session-select').value = newKey;
+  } catch(e) {
+    showError('Rename failed: ' + e.message);
+  } finally {
+    btn.textContent = '✏';
     btn.disabled    = false;
   }
 }
