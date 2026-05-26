@@ -364,8 +364,12 @@
     <label>Guild Password</label>
     <input type="password" id="cfg-password" placeholder="your guild password" autocomplete="off">
     <p class="modal-note" style="margin-top:10px">
-      Deploy the worker first, then set the password with:<br>
-      <code style="color:#c8960c">npx wrangler secret put GUILD_PASSWORD</code>
+      Two passwords control access:<br>
+      <strong style="color:#c8960c">Guild password</strong> — load &amp; view sessions (share with members)<br>
+      <strong style="color:#c8960c">Admin password</strong> — save, rename &amp; delete (loot council only)<br><br>
+      Set both with:<br>
+      <code style="color:#c8960c">wrangler secret put GUILD_PASSWORD</code><br>
+      <code style="color:#c8960c">wrangler secret put ADMIN_PASSWORD</code>
     </p>
     <div class="modal-actions">
       <button class="btn-danger"    onclick="clearSettings()">Clear</button>
@@ -399,8 +403,8 @@
       <select id="session-select"><option value="">No saved sessions found</option></select>
       <button class="btn-refresh-sessions" onclick="fetchSavedSessions()" title="Refresh list">↻</button>
       <button class="btn-load-session" onclick="loadSavedSession()">Load</button>
-      <button class="btn-rename-session" onclick="renameSession()" title="Rename selected session">✏</button>
-      <button class="btn-delete-session" onclick="deleteSession()" title="Delete selected session">🗑</button>
+      <button class="btn-rename-session admin-only" onclick="renameSession()" title="Rename selected session">✏</button>
+      <button class="btn-delete-session admin-only" onclick="deleteSession()" title="Delete selected session">🗑</button>
     </div>
   </div>
 
@@ -408,8 +412,8 @@
     <p>Drag &amp; drop a <strong>.json</strong> export here, or paste below</p>
     <textarea id="paste-area" placeholder='Paste JSON array: [{"player":"…"},…]'></textarea>
     <div class="load-actions">
-      <button class="btn-generate-save" id="btn-generate-save" onclick="loadData(true)">
-        &#128229; Generate &amp; Save to GitHub
+      <button class="btn-generate-save admin-only" id="btn-generate-save" onclick="loadData(true)">
+        &#128229; Generate &amp; Save
       </button>
       <button class="btn-generate-only" onclick="loadData(false)">
         Generate Only
@@ -619,12 +623,28 @@ function openSettings() {
 function closeSettings()      { document.getElementById('settings-modal').classList.remove('open'); }
 function closeSettingsOnBg(e) { if (e.target.id === 'settings-modal') closeSettings(); }
 
-function saveSettings() {
+async function saveSettings() {
   const cfg = {
     workerUrl: document.getElementById('cfg-worker-url').value.trim().replace(/\/$/, ''),
     password:  document.getElementById('cfg-password').value,
+    role:      'member',
   };
   if (!cfg.workerUrl || !cfg.password) return alert('Please fill in both fields.');
+
+  // Verify password + detect role before saving
+  try {
+    const res = await fetch(`${cfg.workerUrl}/me`, {
+      headers: { 'X-Guild-Password': cfg.password },
+    });
+    if (res.status === 401) return alert('Invalid password — double-check and try again.');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    cfg.role = data.role;
+  } catch(e) {
+    if (e.message.startsWith('Invalid')) return;
+    return alert('Could not reach Worker: ' + e.message);
+  }
+
   localStorage.setItem('rcloot_cf_config', JSON.stringify(cfg));
   closeSettings();
   applyConfigUI();
@@ -638,25 +658,30 @@ function clearSettings() {
 }
 
 function applyConfigUI() {
-  const cfg   = getConfig();
-  const badge = document.getElementById('gh-badge');
-  const btn   = document.getElementById('btn-generate-save');
-  const hint  = document.getElementById('load-hint');
-  const wrap  = document.getElementById('saved-sessions-wrap');
+  const cfg     = getConfig();
+  const isAdmin = cfg?.role === 'admin';
+  const badge   = document.getElementById('gh-badge');
+  const hint    = document.getElementById('load-hint');
+  const wrap    = document.getElementById('saved-sessions-wrap');
+
+  // Show/hide all admin-only elements
+  document.querySelectorAll('.admin-only').forEach(el => {
+    el.style.display = isAdmin ? '' : 'none';
+  });
 
   if (cfg) {
     const host = new URL(cfg.workerUrl).hostname;
-    badge.textContent  = `CF: ${host}`;
+    badge.textContent  = isAdmin ? `CF: ${host} (admin)` : `CF: ${host}`;
     badge.className    = 'gh-badge connected';
-    btn.disabled       = false;
-    hint.textContent   = `Sessions saved to Cloudflare R2 via ${host}`;
+    hint.textContent   = isAdmin
+      ? `Saving to Cloudflare R2 via ${host}`
+      : `Connected — load sessions below`;
     wrap.style.display = 'block';
     fetchSavedSessions();
   } else {
     badge.textContent  = 'Cloudflare: not configured';
     badge.className    = 'gh-badge disconnected';
-    btn.disabled       = true;
-    hint.textContent   = 'Configure CF Settings to enable saving.';
+    hint.textContent   = 'Configure CF Settings to connect.';
     wrap.style.display = 'none';
   }
 }
